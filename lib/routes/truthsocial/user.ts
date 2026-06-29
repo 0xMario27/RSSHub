@@ -86,8 +86,8 @@ async function handler(ctx) {
         logger.http(`Requesting ${pageUrl}`);
         await page.goto(pageUrl, { waitUntil: 'commit', timeout: 30000 });
 
-        // Wait for the SPA to make API calls (up to 20 seconds)
-        for (let i = 0; i < 20 && !accountData; i++) {
+        // Wait for the SPA to make API calls (up to 30 seconds, need both account + statuses)
+        for (let i = 0; i < 30 && (!accountData || statusesData.length === 0); i++) {
             await page.waitForTimeout(1000);
         }
 
