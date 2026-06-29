@@ -517,6 +517,9 @@ export type Config = {
         accessToken?: string;
         acctDomain?: string;
     };
+    truthsocial: {
+        accessToken?: string;
+    };
     medium: {
         cookies: Record<string, string | undefined>;
         articleCookie?: string;
@@ -1018,6 +1021,9 @@ const calculateValue = () => {
             apiHost: envs.MASTODON_API_HOST,
             accessToken: envs.MASTODON_API_ACCESS_TOKEN,
             acctDomain: envs.MASTODON_API_ACCT_DOMAIN,
+        },
+        truthsocial: {
+            accessToken: envs.TRUTHSOCIAL_ACCESS_TOKEN,
         },
         medium: {
             cookies: medium_cookies,

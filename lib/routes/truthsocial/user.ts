@@ -1,8 +1,10 @@
+import { config } from '@/config';
 import type { Route } from '@/types';
 import { ViewType } from '@/types';
 import cache from '@/utils/cache';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
+import * as cheerio from 'cheerio';
 
 export const route: Route = {
     path: '/user/:id',
@@ -13,7 +15,13 @@ export const route: Route = {
         id: 'username, with or without @ prefix, e.g. `realDonaldTrump` or `@realDonaldTrump`',
     },
     features: {
-        requireConfig: false,
+        requireConfig: [
+            {
+                name: 'TRUTHSOCIAL_ACCESS_TOKEN',
+                description: 'Truth Social API access token. Required because Truth Social locks down all API endpoints behind authentication. See namespace docs for how to get one.',
+                optional: true,
+            },
+        ],
         requirePuppeteer: false,
         antiCrawler: true,
         supportBT: false,
@@ -33,31 +41,35 @@ export const route: Route = {
 
 async function handler(ctx) {
     const id = ctx.req.param('id').replace(/^@/, '');
-    const site = 'truthsocial.com';
-    const baseUrl = `https://${site}`;
+    const baseUrl = 'https://truthsocial.com';
+    const accessToken = config.truthsocial?.accessToken ?? '';
 
+    // Resolve account ID from the profile page HTML (og:image URL contains the ID)
     const accountId = await cache.tryGet(`truthsocial:account_id:${id}`, async () => {
-        const searchResp = await ofetch(`${baseUrl}/api/v2/search`, {
-            query: {
-                q: id,
-                type: 'accounts',
-                limit: 5,
-            },
-        });
-        const account = searchResp.accounts.find((a) => a.acct === id || a.username === id);
-        if (!account) {
+        const html = await ofetch(`${baseUrl}/@${id}`);
+        const $ = cheerio.load(html);
+        const ogImage = $('meta[property="og:image"]').attr('content');
+        if (!ogImage) {
             throw new Error(`User "${id}" not found on Truth Social`);
         }
-        return account.id;
+        const match = ogImage.match(/accounts\/avatars\/(\d{3})\/(\d{3})\/(\d{3})\/(\d{3})\/(\d{3})\/(\d{3})/);
+        if (!match) {
+            throw new Error(`Cannot resolve account ID for "${id}" from og:image`);
+        }
+        return match.slice(1).join('');
     });
+
+    const headers: Record<string, string> = {};
+    if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+    }
 
     const resp = await ofetch(`${baseUrl}/api/v1/accounts/${accountId}/statuses`, {
-        query: {
-            limit: 40,
-        },
+        query: { limit: 40 },
+        headers,
     });
 
-    const accountData = resp.length > 0 && resp[0].account ? resp[0].account : await ofetch(`${baseUrl}/api/v1/accounts/${accountId}`);
+    const accountData = resp.length > 0 && resp[0].account ? resp[0].account : await ofetch(`${baseUrl}/api/v1/accounts/${accountId}`, { headers });
 
     const items = resp.map((item) => {
         const isReblog = Boolean(item.reblog);

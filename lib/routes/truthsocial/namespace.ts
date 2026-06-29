@@ -5,10 +5,20 @@ export const namespace: Namespace = {
     url: 'truthsocial.com',
     description: `Truth Social is a Mastodon-compatible social media platform.
 
-::: tip
-Truth Social's API is Mastodon-compatible. If this route doesn't work due to Cloudflare protection, you can use the [Mastodon route](/routes/social-media#mastodon) with \`site\` set to \`truthsocial.com\`.
+::: warning
+Truth Social locks down all Mastodon API endpoints behind authentication. To use this route, you must configure a Truth Social access token.
 
-To get a numeric account ID for the Mastodon route, visit \`https://truthsocial.com/api/v1/accounts/lookup?acct=USERNAME\` in your browser.
+### Getting an access token
+
+1. Register an account on [Truth Social](https://truthsocial.com)
+2. Go to **Settings → Development** and create a new application  
+   - Name: RSSHub (or anything)
+   - Scopes: \`read\`
+   - Redirect URI: \`urn:ietf:wg:oauth:2.0:oob\`
+3. Copy your access token
+4. Set the environment variable \`TRUTHSOCIAL_ACCESS_TOKEN\` to the token
+
+Alternatively, if your RSSHub instance's IP is not blocked by Cloudflare and can access the API, you can set \`TRUTHSOCIAL_ACCESS_TOKEN\` to an empty string to attempt unauthenticated access (rarely works).
 :::`,
     lang: 'en',
 };
