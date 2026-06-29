@@ -8,21 +8,20 @@ const __dirname = import.meta.dirname;
 // !!! if any new dependencies are added, update the Dockerfile !!!
 
 const projectRoot = path.resolve(process.env.PROJECT_ROOT || path.join(__dirname, '../..'));
-const resultFolder = path.join(projectRoot, 'app-minimal'); // no need to resolve, ProjectRoot is always absolute
+const resultFolder = path.join(projectRoot, 'app-minimal');
 const files = ['dist/index.mjs', 'node_modules/cross-env/dist/bin/cross-env.js', 'node_modules/.bin/cross-env'].map((file) => path.join(projectRoot, file));
 
 console.log('Start analyzing, project root:', projectRoot);
+
+// First pass: trace main entry
 const { fileList: fileSet } = await nodeFileTrace(files, {
     base: projectRoot,
 });
 let fileList = [...fileSet];
 console.log('Total touchable files:', fileList.length);
-fileList = fileList.filter((file) => file.startsWith('node_modules/')); // only need node_modules
+fileList = fileList.filter((file) => file.startsWith('node_modules/'));
 
-// playwright-core uses path.join to load browsers.json in v1.60+ instead of ../.., which prevents @vercel/nft from tracing it.
-// https://github.com/microsoft/playwright/blob/v1.60.0/packages/playwright-core/src/server/registry/index.ts#L1544 vs
-// https://github.com/microsoft/playwright/blob/v1.59.1/packages/playwright-core/src/server/registry/index.ts#L1520
-// also, nft's special case for `playwright-core` no longer works for `patchright-core` https://github.com/vercel/nft/blob/1.10.2/src/utils/special-cases.ts#L336
+// playwright-core browsers.json workaround
 const patchrightCoreFile = fileList.find((file) => file.includes('/patchright-core/'));
 if (patchrightCoreFile) {
     const packageRoot = patchrightCoreFile.slice(0, patchrightCoreFile.indexOf('/patchright-core/') + '/patchright-core'.length);
@@ -32,12 +31,59 @@ if (patchrightCoreFile) {
         console.log('Manually included patchright-core asset:', browsersJson);
     }
 }
-console.log('Total files need to be copied (touchable files in node_modules/):', fileList.length);
+
+// Find puppeteer-extra-plugin-stealth index to add as trace entry point
+// (its evasions/dependencies are dynamically required and not traced by nft)
+const stealthIndex = fileList.find((f) => f.includes('puppeteer-extra-plugin-stealth') && f.endsWith('index.js'));
+const extraEntryPoints = [];
+if (stealthIndex) {
+    // Also trace the stealth plugin's evasions and dependencies
+    const stealthDir = path.dirname(path.join(projectRoot, stealthIndex));
+    const evasionsDir = path.join(stealthDir, 'evasions');
+    if (await fs.pathExists(evasionsDir)) {
+        // Collect all evasion entry points
+        for (const evasion of await fs.readdir(evasionsDir)) {
+            const evasionIndex = path.join(evasionsDir, evasion, 'index.js');
+            if (await fs.pathExists(evasionIndex)) {
+                extraEntryPoints.push(path.relative(projectRoot, evasionIndex));
+            }
+        }
+    }
+    // Also add dependency package entry points
+    const pnpmDir = path.join(projectRoot, 'node_modules', '.pnpm');
+    if (await fs.pathExists(pnpmDir)) {
+        for (const entry of await fs.readdir(pnpmDir)) {
+            if (entry.startsWith('puppeteer-extra-plugin-user-')) {
+                const pkgName = entry.replace(/@[\d.]+.*/, '');
+                const indexPath = path.join('.pnpm', entry, 'node_modules', pkgName, 'index.js');
+                const fullPath = path.join(projectRoot, 'node_modules', indexPath);
+                if (await fs.pathExists(fullPath) && !fileList.includes(indexPath)) {
+                    extraEntryPoints.push('node_modules/' + indexPath);
+                }
+            }
+        }
+    }
+}
+
+if (extraEntryPoints.length > 0) {
+    console.log('Second pass: tracing', extraEntryPoints.length, 'extra entry points');
+    const extraFiles = extraEntryPoints.map((f) => path.join(projectRoot, f));
+    const { fileList: extraSet } = await nodeFileTrace(extraFiles, {
+        base: projectRoot,
+    });
+    for (const f of extraSet) {
+        if (f.startsWith('node_modules/') && !fileList.includes(f)) {
+            fileList.push(f);
+        }
+    }
+    console.log('Added', extraSet.size, 'extra files from second pass');
+}
+
+console.log('Total files need to be copied:', fileList.length);
 console.log('Start copying files, destination:', resultFolder);
 try {
     await Promise.all(fileList.map((e) => fs.copy(path.join(projectRoot, e), path.join(resultFolder, e))));
 } catch (error) {
-    // fix unhandled promise rejections
     console.error(error, error.stack);
     process.exit(1);
 }

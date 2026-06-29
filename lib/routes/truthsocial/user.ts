@@ -52,16 +52,6 @@ async function handler(ctx) {
         });
         const page = await browser.newPage();
 
-        // Block unnecessary resources
-        await page.route('**/*', (route) => {
-            const type = route.request().resourceType();
-            if (['image', 'media', 'font', 'stylesheet'].includes(type)) {
-                route.abort();
-            } else {
-                route.continue();
-            }
-        });
-
         // Intercept API responses from the SPA
         let accountData: any = null;
         let statusesData: any[] = [];
@@ -85,10 +75,12 @@ async function handler(ctx) {
         });
 
         logger.http(`Requesting ${pageUrl}`);
-        await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 30000 });
+        await page.goto(pageUrl, { waitUntil: 'commit', timeout: 30000 });
 
-        // Give extra time for all API calls to complete
-        await page.waitForTimeout(3000);
+        // Wait for the SPA to make API calls (up to 20 seconds)
+        for (let i = 0; i < 20 && !accountData; i++) {
+            await page.waitForTimeout(1000);
+        }
 
         if (!accountData) {
             throw new Error(`User "${id}" not found or API blocked`);
