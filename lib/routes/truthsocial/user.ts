@@ -71,9 +71,12 @@ async function handler(ctx) {
                 if (url.includes('/api/v1/accounts/lookup')) {
                     accountData = await resp.json();
                 }
-                // Capture the first statuses response that isn't pinned/media filtered
-                if (url.includes('/api/v1/accounts/') && url.includes('/statuses') && !url.includes('pinned') && !url.includes('only_media') && statusesData.length === 0) {
-                    statusesData = await resp.json();
+                // Capture the latest main statuses response (overwrite previous)
+                if (url.includes('/api/v1/accounts/') && url.includes('/statuses') && !url.includes('pinned') && !url.includes('only_media')) {
+                    const data = await resp.json();
+                    if (Array.isArray(data) && data.length > 0) {
+                        statusesData = data;
+                    }
                 }
             } catch {
                 // ignore parse errors
