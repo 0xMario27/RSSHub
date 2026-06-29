@@ -117,6 +117,8 @@
         "patchright": "1.61.0",
         "playwright-extra": "^4.3.6",
         "puppeteer-extra-plugin-stealth": "^2.11.2",
+        "puppeteer-extra-plugin-user-data-dir": "^2.4.1",
+        "puppeteer-extra-plugin-user-preferences": "^2.4.1",
         "query-string": "9.4.0",
         "rate-limiter-flexible": "11.2.0",
         "re2js": "2.8.3",

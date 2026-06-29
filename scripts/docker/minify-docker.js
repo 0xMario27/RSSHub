@@ -87,3 +87,21 @@ try {
     console.error(error, error.stack);
     process.exit(1);
 }
+
+// Create missing node_modules symlinks for packages under .pnpm/
+// nft copies the resolved files into .pnpm/ but doesn't create the node_modules/pkg→.pnpm/... symlinks
+console.log('Creating missing node_modules symlinks...');
+const resultPnpm = path.join(resultFolder, 'node_modules', '.pnpm');
+if (await fs.pathExists(resultPnpm)) {
+    for (const entry of await fs.readdir(resultPnpm)) {
+        // entry looks like: deepmerge@4.3.1 or puppeteer-extra-plugin-stealth@2.11.2_playwright-extra@4.3.6
+        const atIndex = entry.indexOf('@');
+        if (atIndex <= 0) continue;
+        const pkgName = entry.substring(0, atIndex);
+        const srcDir = path.join(resultPnpm, entry, 'node_modules', pkgName);
+        const symlinkPath = path.join(resultFolder, 'node_modules', pkgName);
+        if (await fs.pathExists(srcDir) && !(await fs.pathExists(symlinkPath))) {
+            await fs.symlink(path.relative(path.join(resultFolder, 'node_modules'), srcDir), symlinkPath);
+        }
+    }
+}

@@ -211,6 +211,12 @@ importers:
       puppeteer-extra-plugin-stealth:
         specifier: ^2.11.2
         version: 2.11.2(playwright-extra@4.3.6)
+      puppeteer-extra-plugin-user-data-dir:
+        specifier: ^2.4.1
+        version: 2.4.1(playwright-extra@4.3.6)
+      puppeteer-extra-plugin-user-preferences:
+        specifier: ^2.4.1
+        version: 2.4.1(playwright-extra@4.3.6)
       query-string:
         specifier: 9.4.0
         version: 9.4.0

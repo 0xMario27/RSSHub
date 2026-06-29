@@ -1,8 +1,13 @@
+import { config } from '@/config';
 import type { Route } from '@/types';
 import { ViewType } from '@/types';
 import { parseDate } from '@/utils/parse-date';
 import { addExtra } from 'playwright-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+// These are dynamically required by stealth/evasions/user-agent-override.
+// Import them statically so @vercel/nft traces them in Docker builds.
+import 'puppeteer-extra-plugin-user-preferences';
+import 'puppeteer-extra-plugin-user-data-dir';
 import { chromium } from 'patchright';
 import logger from '@/utils/logger';
 
@@ -45,6 +50,7 @@ async function handler(ctx) {
     try {
         browser = await stealthChromium.launch({
             headless: true,
+            executablePath: config.chromiumExecutablePath || undefined,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
