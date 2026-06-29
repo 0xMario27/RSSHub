@@ -1,10 +1,13 @@
-import { config } from '@/config';
 import type { Route } from '@/types';
 import { ViewType } from '@/types';
-import cache from '@/utils/cache';
-import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
-import * as cheerio from 'cheerio';
+import { addExtra } from 'playwright-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { chromium } from 'patchright';
+import logger from '@/utils/logger';
+
+const stealthChromium = addExtra(chromium);
+stealthChromium.use(StealthPlugin());
 
 export const route: Route = {
     path: '/user/:id',
@@ -15,14 +18,8 @@ export const route: Route = {
         id: 'username, with or without @ prefix, e.g. `realDonaldTrump` or `@realDonaldTrump`',
     },
     features: {
-        requireConfig: [
-            {
-                name: 'TRUTHSOCIAL_ACCESS_TOKEN',
-                description: 'Truth Social API access token. Required because Truth Social locks down all API endpoints behind authentication. See namespace docs for how to get one.',
-                optional: true,
-            },
-        ],
-        requirePuppeteer: false,
+        requireConfig: false,
+        requirePuppeteer: true,
         antiCrawler: true,
         supportBT: false,
         supportPodcast: false,
@@ -42,80 +39,111 @@ export const route: Route = {
 async function handler(ctx) {
     const id = ctx.req.param('id').replace(/^@/, '');
     const baseUrl = 'https://truthsocial.com';
-    const accessToken = config.truthsocial?.accessToken ?? '';
+    const pageUrl = `${baseUrl}/@${id}`;
 
-    // Resolve account ID from the profile page HTML (og:image URL contains the ID)
-    const accountId = await cache.tryGet(`truthsocial:account_id:${id}`, async () => {
-        const html = await ofetch(`${baseUrl}/@${id}`);
-        const $ = cheerio.load(html);
-        const ogImage = $('meta[property="og:image"]').attr('content');
-        if (!ogImage) {
-            throw new Error(`User "${id}" not found on Truth Social`);
-        }
-        const match = ogImage.match(/accounts\/avatars\/(\d{3})\/(\d{3})\/(\d{3})\/(\d{3})\/(\d{3})\/(\d{3})/);
-        if (!match) {
-            throw new Error(`Cannot resolve account ID for "${id}" from og:image`);
-        }
-        return match.slice(1).join('');
-    });
+    let browser;
+    try {
+        browser = await stealthChromium.launch({
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+            ],
+        });
+        const page = await browser.newPage();
 
-    const headers: Record<string, string> = {};
-    if (accessToken) {
-        headers.Authorization = `Bearer ${accessToken}`;
-    }
+        // Block unnecessary resources
+        await page.route('**/*', (route) => {
+            const type = route.request().resourceType();
+            if (['image', 'media', 'font', 'stylesheet'].includes(type)) {
+                route.abort();
+            } else {
+                route.continue();
+            }
+        });
 
-    const resp = await ofetch(`${baseUrl}/api/v1/accounts/${accountId}/statuses`, {
-        query: { limit: 40 },
-        headers,
-    });
+        // Intercept API responses from the SPA
+        let accountData: any = null;
+        let statusesData: any[] = [];
 
-    const accountData = resp.length > 0 && resp[0].account ? resp[0].account : await ofetch(`${baseUrl}/api/v1/accounts/${accountId}`, { headers });
-
-    const items = resp.map((item) => {
-        const isReblog = Boolean(item.reblog);
-        const status = item.reblog ?? item;
-        const content = status.content ? status.content.replaceAll(/<span.*?>|<\/span.*?>/g, '') : '';
-        const contentText = content.replaceAll(/<(?:.|\n)*?>/g, '\n');
-
-        const media = (status.media_attachments ?? [])
-            .map((m) => {
-                const url = m.remote_url ?? m.url;
-                const desc = m.description ?? '';
-                switch (m.type) {
-                    case 'gifv':
-                        return `<br><video src="${url}" autoplay loop>${desc}</video>`;
-                    case 'video':
-                        return `<br><video src="${url}" controls loop>${desc}</video>`;
-                    case 'image':
-                        return `<br><img src="${url}" alt="${desc}">`;
-                    case 'audio':
-                        return `<br><audio controls src="${url}">${desc}</audio>`;
-                    default:
-                        return `<br><a href="${url}">${desc}</a>`;
+        page.on('response', async (resp) => {
+            const url = resp.url();
+            if (resp.status() !== 200) {
+                return;
+            }
+            try {
+                if (url.includes('/api/v1/accounts/lookup')) {
+                    accountData = await resp.json();
                 }
-            })
-            .join('');
+                // Capture the first statuses response that isn't pinned/media filtered
+                if (url.includes('/api/v1/accounts/') && url.includes('/statuses') && !url.includes('pinned') && !url.includes('only_media') && statusesData.length === 0) {
+                    statusesData = await resp.json();
+                }
+            } catch {
+                // ignore parse errors
+            }
+        });
 
-        const author = `${status.account.display_name} (@${status.account.acct})`;
-        const titlePrefix = isReblog ? `RT @${item.account.username}` : `@${status.account.username}`;
-        const titleText = status.sensitive === true ? `(CW) ${status.spoiler_text}` : contentText;
-        const title = `${titlePrefix}: "${titleText}"`;
+        logger.http(`Requesting ${pageUrl}`);
+        await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 30000 });
+
+        // Give extra time for all API calls to complete
+        await page.waitForTimeout(3000);
+
+        if (!accountData) {
+            throw new Error(`User "${id}" not found or API blocked`);
+        }
+
+        const items = statusesData.map((item) => {
+            const isReblog = Boolean(item.reblog);
+            const status = item.reblog ?? item;
+            const content = status.content ? status.content.replaceAll(/<span.*?>|<\/span.*?>/g, '') : '';
+            const contentText = content.replaceAll(/<(?:.|\n)*?>/g, '\n');
+
+            const media = (status.media_attachments ?? [])
+                .map((m) => {
+                    const url = m.remote_url ?? m.url;
+                    const desc = m.description ?? '';
+                    switch (m.type) {
+                        case 'gifv':
+                            return `<br><video src="${url}" autoplay loop>${desc}</video>`;
+                        case 'video':
+                            return `<br><video src="${url}" controls loop>${desc}</video>`;
+                        case 'image':
+                            return `<br><img src="${url}" alt="${desc}">`;
+                        case 'audio':
+                            return `<br><audio controls src="${url}">${desc}</audio>`;
+                        default:
+                            return `<br><a href="${url}">${desc}</a>`;
+                    }
+                })
+                .join('');
+
+            const author = `${status.account.display_name} (@${status.account.acct})`;
+            const titlePrefix = isReblog ? `RT @${item.account.username}` : `@${status.account.username}`;
+            const titleText = status.sensitive === true ? `(CW) ${status.spoiler_text}` : contentText;
+            const title = `${titlePrefix}: "${titleText}"`;
+
+            return {
+                title,
+                author,
+                description: (status.spoiler_text ? status.spoiler_text + '<hr />' : '') + content + media,
+                pubDate: parseDate(status.created_at),
+                link: status.url ?? `${baseUrl}/@${status.account.username}/${status.id}`,
+                guid: status.uri,
+            };
+        });
 
         return {
-            title,
-            author,
-            description: (status.spoiler_text ? status.spoiler_text + '<hr />' : '') + content + media,
-            pubDate: parseDate(status.created_at),
-            link: status.url ?? `${baseUrl}/@${status.account.username}/${status.id}`,
-            guid: status.uri,
+            title: `${accountData.display_name} (@${accountData.acct})`,
+            link: accountData.url ?? pageUrl,
+            description: accountData.note,
+            item: items,
+            allowEmpty: true,
         };
-    });
-
-    return {
-        title: `${accountData.display_name} (@${accountData.acct})`,
-        link: accountData.url ?? `${baseUrl}/@${id}`,
-        description: accountData.note,
-        item: items,
-        allowEmpty: true,
-    };
+    } finally {
+        if (browser) {
+            await browser.close().catch(() => {});
+        }
+    }
 }

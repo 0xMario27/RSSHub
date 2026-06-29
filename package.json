@@ -115,6 +115,8 @@
         "p-map": "7.0.4",
         "pac-proxy-agent": "9.1.0",
         "patchright": "1.61.0",
+        "playwright-extra": "^4.3.6",
+        "puppeteer-extra-plugin-stealth": "^2.11.2",
         "query-string": "9.4.0",
         "rate-limiter-flexible": "11.2.0",
         "re2js": "2.8.3",
