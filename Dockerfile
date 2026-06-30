@@ -136,6 +136,9 @@ RUN \
         dumb-init git curl xvfb \
     ; \
     if [ "$PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD" = 0 ]; then \
+        # Xvfb provides a virtual display so Chromium can run headful, which is required to
+        # pass Cloudflare's JS challenge (e.g. the truthsocial route). See CMD below.
+        apt-get install -yq --no-install-recommends xvfb && \
         if [ "$TARGETPLATFORM" = 'linux/amd64' ]; then \
             apt-get install -yq --no-install-recommends \
                 ca-certificates fonts-liberation wget xdg-utils \
