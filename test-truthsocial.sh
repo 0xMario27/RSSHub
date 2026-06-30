@@ -34,10 +34,10 @@ echo ""
 
 # === Step 1: Pull image ===
 info "Step 1/5: Pulling Docker image..."
-if docker pull "$IMAGE" 2>&1 | tail -1 | grep -q "Downloaded\|up to date"; then
-    green "Image pulled: $IMAGE"
+if docker pull "$IMAGE" 2>&1 | grep -iq "downloaded\|up to date\|pulled"; then
+    green "Image ready: $IMAGE"
 else
-    red "Failed to pull image"
+    red "Failed to pull image. Check: docker pull $IMAGE"
     exit 1
 fi
 
