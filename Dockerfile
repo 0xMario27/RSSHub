@@ -173,7 +173,7 @@ COPY --from=docker-minifier /app /app
 EXPOSE 1200
 ENTRYPOINT ["dumb-init", "--"]
 
-CMD ["npm", "run", "start"]
+CMD ["sh", "-c", "set -a && . /app/.env 2>/dev/null; npm run start"]
 
 # ---------------------------------------------------------------------------------------------------------------------
 
