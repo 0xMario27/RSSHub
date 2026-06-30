@@ -48,15 +48,15 @@ async function handler(ctx) {
 
     let browser;
     try {
-        browser = await stealthChromium.launch({
-            headless: true,
+        browser = await stealthChromium.launchPersistentContext('/tmp/rsshub-chrome-profile', {
+            headless: false,
             executablePath: config.chromiumExecutablePath || undefined,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
             ],
         });
-        const page = await browser.newPage();
+        const page = browser.pages()[0] || await browser.newPage();
 
         // Intercept API responses from the SPA
         let accountData: any = null;
@@ -64,8 +64,6 @@ async function handler(ctx) {
 
         page.on('response', async (resp) => {
             const url = resp.url();
-            // Force debug output even in production
-            process.stdout.write('RESP:' + resp.status() + ' ' + url.substring(0, 120) + '\n');
             if (resp.status() !== 200) {
                 return;
             }

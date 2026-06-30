@@ -133,7 +133,7 @@ RUN \
     set -ex && \
     apt-get update && \
     apt-get install -yq --no-install-recommends \
-        dumb-init git curl \
+        dumb-init git curl xvfb \
     ; \
     if [ "$PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD" = 0 ]; then \
         if [ "$TARGETPLATFORM" = 'linux/amd64' ]; then \
@@ -174,7 +174,7 @@ COPY --from=docker-minifier /app /app
 EXPOSE 1200
 ENTRYPOINT ["dumb-init", "--"]
 
-CMD ["sh", "-c", "set -a && . /app/.env 2>/dev/null; npm run start"]
+CMD ["sh", "-c", "Xvfb :99 -screen 0 1280x720x24 -ac +extension GLX &>/dev/null & export DISPLAY=:99; set -a && . /app/.env 2>/dev/null; npm run start"]
 
 # ---------------------------------------------------------------------------------------------------------------------
 
