@@ -2,19 +2,17 @@ import { config } from '@/config';
 import type { Route } from '@/types';
 import { ViewType } from '@/types';
 import { parseDate } from '@/utils/parse-date';
+import { addExtra } from 'playwright-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+// These are dynamically required by stealth/evasions/user-agent-override.
+// Import them statically so @vercel/nft traces them in Docker builds.
+import 'puppeteer-extra-plugin-user-preferences';
+import 'puppeteer-extra-plugin-user-data-dir';
 import { chromium } from 'patchright';
 import logger from '@/utils/logger';
-import os from 'node:os';
-import path from 'node:path';
 
-// Cloudflare blocks every headless Chromium mode on truthsocial.com (including the "new"
-// headless mode). The only reliable way through its JavaScript challenge is a *headful*
-// browser, which on a server must run under a virtual display such as Xvfb.
-// A persistent context lets the cf_clearance cookie survive across requests, so the
-// challenge usually only has to be solved once. The same profile directory cannot be
-// opened by two browser instances at once, so requests are serialized via an in-process lock.
-const userDataDir = path.join(os.tmpdir(), 'rsshub-truthsocial-profile');
-let browserLock: Promise<unknown> = Promise.resolve();
+const stealthChromium = addExtra(chromium);
+stealthChromium.use(StealthPlugin());
 
 export const route: Route = {
     path: '/user/:id',
@@ -43,35 +41,32 @@ export const route: Route = {
     ],
 };
 
-async function fetchUser(id: string) {
+async function handler(ctx) {
+    const id = ctx.req.param('id').replace(/^@/, '');
     const baseUrl = 'https://truthsocial.com';
     const pageUrl = `${baseUrl}/@${id}`;
 
-    // config.chromiumExecutablePath may point at a headless_shell binary (the amd64 Docker
-    // image sets it that way), which cannot run headful. In that case, fall back to
-    // Patchright's bundled full Chromium by leaving executablePath unset.
-    const executablePath = config.chromiumExecutablePath;
-    const useExecutablePath = executablePath && !executablePath.includes('headless_shell');
-
-    const context = await chromium.launchPersistentContext(userDataDir, {
-        headless: false,
-        viewport: null,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        ...(useExecutablePath ? { executablePath } : {}),
-    });
-
+    let browser;
     try {
-        const page = context.pages()[0] ?? (await context.newPage());
+        browser = await stealthChromium.launchPersistentContext('/tmp/rsshub-chrome-profile', {
+            headless: false,
+            executablePath: config.chromiumExecutablePath || undefined,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+            ],
+        });
+        const page = browser.pages()[0] || await browser.newPage();
 
         // Intercept API responses from the SPA
         let accountData: any = null;
         let statusesData: any[] = [];
 
         page.on('response', async (resp) => {
+            const url = resp.url();
             if (resp.status() !== 200) {
                 return;
             }
-            const url = resp.url();
             try {
                 if (url.includes('/api/v1/accounts/lookup')) {
                     accountData = await resp.json();
@@ -91,14 +86,13 @@ async function fetchUser(id: string) {
         logger.http(`Requesting ${pageUrl}`);
         await page.goto(pageUrl, { waitUntil: 'commit', timeout: 30000 });
 
-        // Wait for the SPA to solve the Cloudflare challenge and call its APIs
-        // (up to 30 seconds, need both account + statuses).
+        // Wait for the SPA to make API calls (up to 30 seconds, need both account + statuses)
         for (let i = 0; i < 30 && (!accountData || statusesData.length === 0); i++) {
             await page.waitForTimeout(1000);
         }
 
         if (!accountData) {
-            throw new Error(`User "${id}" not found or blocked by Cloudflare`);
+            throw new Error(`User "${id}" not found or API blocked`);
         }
 
         const items = statusesData.map((item) => {
@@ -149,14 +143,8 @@ async function fetchUser(id: string) {
             allowEmpty: true,
         };
     } finally {
-        await context.close().catch(() => {});
+        if (browser) {
+            await browser.close().catch(() => {});
+        }
     }
-}
-
-async function handler(ctx) {
-    const id = ctx.req.param('id').replace(/^@/, '');
-    // Serialize browser access: the persistent profile can only be opened by one instance at a time.
-    const result = browserLock.then(() => fetchUser(id));
-    browserLock = result.catch(() => {});
-    return result;
 }
