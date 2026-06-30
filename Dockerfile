@@ -158,7 +158,8 @@ RUN \
     set -ex && \
     if [ "$PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD" = 0 ] && [ "$TARGETPLATFORM" = 'linux/amd64' ]; then \
         echo 'Verifying Chromium installation...' && \
-        _chrome_path=$(find /app/node_modules/.cache/ms-playwright/ -name chrome -xtype f -executable | head -n1) && \
+        _chrome_path=$(find /app/node_modules/.cache/ms-playwright/ -name headless_shell -xtype f -executable 2>/dev/null | head -n1) && \
+        if [ -z "$_chrome_path" ]; then _chrome_path=$(find /app/node_modules/.cache/ms-playwright/ -name chrome -xtype f -executable | head -n1); fi && \
         echo "CHROMIUM_EXECUTABLE_PATH=$_chrome_path" | tee /app/.env && \
         if ldd "$_chrome_path" | grep "not found"; then \
             echo "!!! Chromium has unmet shared libs !!!" && \

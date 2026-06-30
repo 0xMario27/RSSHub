@@ -64,6 +64,8 @@ async function handler(ctx) {
 
         page.on('response', async (resp) => {
             const url = resp.url();
+            // Force debug output even in production
+            process.stdout.write('RESP:' + resp.status() + ' ' + url.substring(0, 120) + '\n');
             if (resp.status() !== 200) {
                 return;
             }
