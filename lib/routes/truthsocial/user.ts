@@ -54,6 +54,7 @@ async function handler(ctx) {
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
+                ...(process.env.TRUTHSOCIAL_PROXY ? [`--proxy-server=${process.env.TRUTHSOCIAL_PROXY}`] : []),
             ],
         });
         const page = browser.pages()[0] || await browser.newPage();
